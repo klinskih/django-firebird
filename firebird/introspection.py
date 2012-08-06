@@ -27,27 +27,44 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
         # of all of that.
         170: 'BooleanField',
         171: 'IPField',
-    }
+        }
 
     def get_table_list(self, cursor):
         "Returns a list of table names in the current database."
-        cursor.execute("""select rdb$relation_name from rdb$relations
-            where rdb$system_flag=0 and rdb$view_source is null
-            order by rdb$relation_name""")
+        cursor.execute("""select distinct R.RDB$RELATION_NAME,
+                0
+from RDB$RELATIONS R
+where R.RDB$SYSTEM_FLAG = 0 and R.RDB$VIEW_SOURCE is null and not exists(select 1
+                                                                         from RDB$RELATION_CONSTRAINTS RC
+                                                                         left join RDB$INDICES I1 on (RC.RDB$INDEX_NAME = I1.RDB$INDEX_NAME)
+                                                                         where RC.RDB$RELATION_NAME = R.RDB$RELATION_NAME and RC.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY' and I1.RDB$FOREIGN_KEY not in (select RDB$INDEX_NAME
+                                                                                                                                                                                                    from RDB$RELATION_CONSTRAINTS
+                                                                                                                                                                                                    where RDB$RELATION_NAME = RC.RDB$RELATION_NAME and RDB$CONSTRAINT_TYPE <> 'FOREIGN KEY' and RDB$INDEX_NAME is not null))
+union
+select distinct R.RDB$RELATION_NAME,
+                1
+from RDB$RELATIONS R
+where R.RDB$SYSTEM_FLAG = 0 and R.RDB$VIEW_SOURCE is null and exists(select 1
+                                                                     from RDB$RELATION_CONSTRAINTS RC
+                                                                     left join RDB$INDICES I1 on (RC.RDB$INDEX_NAME = I1.RDB$INDEX_NAME)
+                                                                     where RC.RDB$RELATION_NAME = R.RDB$RELATION_NAME and RC.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY' and I1.RDB$FOREIGN_KEY not in (select RDB$INDEX_NAME
+                                                                                                                                                                                                from RDB$RELATION_CONSTRAINTS
+                                                                                                                                                                                                where RDB$RELATION_NAME = RC.RDB$RELATION_NAME and RDB$CONSTRAINT_TYPE <> 'FOREIGN KEY' and RDB$INDEX_NAME is not null))
+order by 2, 1""")
         return [r[0].strip().lower() for r in cursor.fetchall()]
-    
+
     def table_name_converter(self, name):
         return name.lower()
 
     def get_table_description(self, cursor, table_name):
         "Returns a description of the table, with the DB-API cursor.description interface."
         tbl_name = "'%s'" % table_name
-        sql="""
+        sql = """
 	    insert into FRAMEWORK_FORM_GROUP_FIELDS (FIELD_NAME, TABLE_NAME, GROUP_ID, FIELD_ORDER, SHOW_ON_FORM, SHOW_ON_FORM_LIST)
 	    select
     		case RF.RDB$FIELD_NAME
         	    when 'ID' then 'RID'
-        	    else RF.RDB$FIELD_NAME
+        	    else cast(RF.RDB$FIELD_NAME as varchar(1024))
     		end,
     		RF.RDB$RELATION_NAME,
     		1,
@@ -92,8 +109,9 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
             """ % (tbl_name,))
         #from IPython.Shell import IPShellEmbed
         #IPShellEmbed()()
-        return [(r[0].strip(), r[1], r[2], r[2] or 0, r[3], r[4], not (r[5] == 1), r[6], r[7]) for r in cursor.fetchall()]
-        
+        return [(r[0].strip(), r[1], r[2], r[2] or 0, r[3], r[4], not (r[5] == 1), r[6], r[7]) for r in
+                                                                                               cursor.fetchall()]
+
     def get_relations(self, cursor, table_name):
         """
         Returns a dictionary of {field_index: (field_index_other_table, other_table)}
@@ -101,23 +119,18 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
         """
         tbl_name = "'%s'" % table_name
         cursor.execute("""
-            select
-              rf1.rdb$field_position
-              , rf2.rdb$field_position
-              , rf2.rdb$relation_name
-            from
-              rdb$relation_constraints rc1
-              join rdb$indices i1 on (rc1.rdb$index_name = i1.rdb$index_name)
-              join rdb$index_segments is1 on (i1.rdb$index_name = is1.rdb$index_name)
-              join rdb$relation_fields rf1 on (rc1.rdb$relation_name = rf1.rdb$relation_name and is1.rdb$field_name = rf1.rdb$field_name)
-              join rdb$relation_constraints rc2 on (rc2.rdb$constraint_name = i1.rdb$foreign_key)
-              join rdb$index_segments is2 on (rc2.rdb$index_name = is2.rdb$index_name)
-              join rdb$relation_fields rf2 on (rc2.rdb$relation_name = rf2.rdb$relation_name and is2.rdb$field_name = rf2.rdb$field_name)
-            where
-              rf1.rdb$relation_name = upper(%s)
-              and rc1.rdb$constraint_type = 'FOREIGN KEY'
-            order by
-              rf1.rdb$field_position""" % (tbl_name,))
+            select  RF1.RDB$FIELD_POSITION,
+                    RF2.RDB$FIELD_POSITION,
+                    RF2.RDB$RELATION_NAME
+            from RDB$RELATION_CONSTRAINTS RC1
+            join RDB$INDICES I1 on (RC1.RDB$INDEX_NAME = I1.RDB$INDEX_NAME)
+            join RDB$INDEX_SEGMENTS IS1 on (I1.RDB$INDEX_NAME = IS1.RDB$INDEX_NAME)
+            join RDB$RELATION_FIELDS RF1 on (RC1.RDB$RELATION_NAME = RF1.RDB$RELATION_NAME and IS1.RDB$FIELD_NAME = RF1.RDB$FIELD_NAME)
+            join RDB$RELATION_CONSTRAINTS RC2 on (RC2.RDB$INDEX_NAME = I1.RDB$FOREIGN_KEY)
+            join RDB$INDEX_SEGMENTS IS2 on (RC2.RDB$INDEX_NAME = IS2.RDB$INDEX_NAME)
+            join RDB$RELATION_FIELDS RF2 on (RC2.RDB$RELATION_NAME = RF2.RDB$RELATION_NAME and IS2.RDB$FIELD_NAME = RF2.RDB$FIELD_NAME)
+            where RF1.RDB$RELATION_NAME = upper(%s) and RC1.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'
+            order by RF1.RDB$FIELD_POSITION """ % (tbl_name,))
 
         relations = {}
         for r in cursor.fetchall():
