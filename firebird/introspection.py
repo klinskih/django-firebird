@@ -31,26 +31,11 @@ class DatabaseIntrospection(BaseDatabaseIntrospection):
 
     def get_table_list(self, cursor):
         "Returns a list of table names in the current database."
-        cursor.execute("""select distinct R.RDB$RELATION_NAME,
-                0
-from RDB$RELATIONS R
-where R.RDB$SYSTEM_FLAG = 0 and R.RDB$VIEW_SOURCE is null and not exists(select 1
-                                                                         from RDB$RELATION_CONSTRAINTS RC
-                                                                         left join RDB$INDICES I1 on (RC.RDB$INDEX_NAME = I1.RDB$INDEX_NAME)
-                                                                         where RC.RDB$RELATION_NAME = R.RDB$RELATION_NAME and RC.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY' and I1.RDB$FOREIGN_KEY not in (select RDB$INDEX_NAME
-                                                                                                                                                                                                    from RDB$RELATION_CONSTRAINTS
-                                                                                                                                                                                                    where RDB$RELATION_NAME = RC.RDB$RELATION_NAME and RDB$CONSTRAINT_TYPE <> 'FOREIGN KEY' and RDB$INDEX_NAME is not null))
-union
-select distinct R.RDB$RELATION_NAME,
-                1
-from RDB$RELATIONS R
-where R.RDB$SYSTEM_FLAG = 0 and R.RDB$VIEW_SOURCE is null and exists(select 1
-                                                                     from RDB$RELATION_CONSTRAINTS RC
-                                                                     left join RDB$INDICES I1 on (RC.RDB$INDEX_NAME = I1.RDB$INDEX_NAME)
-                                                                     where RC.RDB$RELATION_NAME = R.RDB$RELATION_NAME and RC.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY' and I1.RDB$FOREIGN_KEY not in (select RDB$INDEX_NAME
-                                                                                                                                                                                                from RDB$RELATION_CONSTRAINTS
-                                                                                                                                                                                                where RDB$RELATION_NAME = RC.RDB$RELATION_NAME and RDB$CONSTRAINT_TYPE <> 'FOREIGN KEY' and RDB$INDEX_NAME is not null))
-order by 2, 1""")
+        cursor.execute("""
+                            select distinct R.RDB$RELATION_NAME
+                            from RDB$RELATIONS R
+                            where R.RDB$SYSTEM_FLAG = 0 and R.RDB$VIEW_SOURCE is null
+                            order by 1""")
         return [r[0].strip().lower() for r in cursor.fetchall()]
 
     def table_name_converter(self, name):
